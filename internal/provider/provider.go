@@ -145,5 +145,7 @@ func (p *mongodbProvider) DataSources(_ context.Context) []func() datasource.Dat
 func (p *mongodbProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewIndexResource,
+		NewDatabaseResource,
+		NewCollectionResource,
 	}
 }
