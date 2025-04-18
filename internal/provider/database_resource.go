@@ -110,18 +110,6 @@ func (r *databaseResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	// Drop the dummy collection as we don't need it
-	err = db.Collection("_terraform_created").Drop(ctx)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Unable to clean up dummy collection",
-			"An unexpected error occurred when cleaning up. "+
-				"If the error is not clear, please contact the provider developers.\n\n"+
-				"Error: "+err.Error(),
-		)
-		return
-	}
-
 	plan.Id = types.StringValue(databaseName)
 
 	// Set state to fully populated data
