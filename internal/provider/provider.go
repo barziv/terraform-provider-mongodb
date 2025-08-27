@@ -2,15 +2,15 @@ package provider
 
 import (
 	"context"
-	"os"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+
+	"strconv"
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -39,7 +39,18 @@ type mongodbProvider struct {
 }
 
 type mongodbProviderModel struct {
-	Url types.String `tfsdk:"url"`
+	Host               string `tfsdk:"host"`
+	Port               string `tfsdk:"port"`
+	Certificate        string `tfsdk:"certificate"`
+	Username           string `tfsdk:"username"`
+	Password           string `tfsdk:"password"`
+	AuthDatabase       string `tfsdk:"auth_database"`
+	ReplicaSet         string `tfsdk:"replica_set"`
+	InsecureSkipVerify bool   `tfsdk:"insecure_skip_verify"`
+	SSL                bool   `tfsdk:"ssl"`
+	Direct             bool   `tfsdk:"direct"`
+	RetryWrites        bool   `tfsdk:"retrywrites"`
+	Proxy              string `tfsdk:"proxy"`
 }
 
 // Metadata returns the provider type name.
@@ -53,9 +64,53 @@ func (p *mongodbProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 	resp.Schema = schema.Schema{
 		Description: "Create resources in MongoDB.",
 		Attributes: map[string]schema.Attribute{
-			"url": schema.StringAttribute{
+			"host": schema.StringAttribute{
+				Required:    true,
+				Description: "The mongodb server address.",
+			},
+			"port": schema.StringAttribute{
+				Required:    true,
+				Description: "The mongodb server port",
+			},
+			"certificate": schema.StringAttribute{
 				Optional:    true,
-				Description: "URL of the MongoDB instance to connect to.",
+				Description: "PEM-encoded content of Mongodb host CA certificate",
+			},
+			"username": schema.StringAttribute{
+				Required:    true,
+				Description: "The mongodb user",
+			},
+			"password": schema.StringAttribute{
+				Required:    true,
+				Description: "The mongodb password",
+			},
+			"auth_database": schema.StringAttribute{
+				Optional:    true,
+				Description: "The mongodb auth database",
+			},
+			"replica_set": schema.StringAttribute{
+				Optional:    true,
+				Description: "The mongodb replica set",
+			},
+			"insecure_skip_verify": schema.BoolAttribute{
+				Optional:    true,
+				Description: "ignore hostname verification",
+			},
+			"ssl": schema.BoolAttribute{
+				Optional:    true,
+				Description: "ssl activation",
+			},
+			"direct": schema.BoolAttribute{
+				Optional:    true,
+				Description: "enforces a direct connection instead of discovery",
+			},
+			"retrywrites": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Retryable Writes",
+			},
+			"proxy": schema.StringAttribute{
+				Optional:    true,
+				Description: "Proxy through which to connect to MongoDB. Supported protocols are http, https, and socks5. ",
 			},
 		},
 	}
@@ -74,12 +129,35 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 
 	// If practitioner provided a configuration value for any of the
 	// attributes, it must be a known value.
-	if config.Url.IsUnknown() {
+	if config.Host == "" {
 		resp.Diagnostics.AddAttributeError(
-			path.Root("url"),
-			"Unknown MongoDB Url",
-			"The provider cannot create the MongoDB client as there is an unknown configuration value for the url. "+
-				"Either target apply the source of the value first, set the value statically in the configuration, or use the MONGODB_URL environment variable.",
+			path.Root("host"),
+			"Unknown MongoDB Host",
+			"The provider cannot create the MongoDB client as there is an unknown configuration value for the host. ",
+		)
+	}
+
+	if config.Port == "" {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("port"),
+			"Unknown MongoDB Port",
+			"The provider cannot create the MongoDB client as there is an unknown configuration value for the port. ",
+		)
+	}
+
+	if config.Username == "" {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("username"),
+			"Unknown MongoDB Username",
+			"The provider cannot create the MongoDB client as there is an unknown configuration value for the Username. ",
+		)
+	}
+
+	if config.Password == "" {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("password"),
+			"Unknown MongoDB Password",
+			"The provider cannot create the MongoDB client as there is an unknown configuration value for the password. ",
 		)
 	}
 
@@ -87,37 +165,69 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 		return
 	}
 
-	// Default values to environment variables, but override
-	// with Terraform configuration value if set.
+	var arguments = ""
 
-	url := os.Getenv("MONGODB_URL")
+	arguments = addArgs(arguments, "retrywrites="+strconv.FormatBool(config.RetryWrites))
 
-	if !config.Url.IsNull() {
-		url = config.Url.ValueString()
+	if config.SSL {
+		arguments = addArgs(arguments, "ssl=true")
 	}
 
-	// If any of the expected configurations are missing, return
-	// errors with provider-specific guidance.
-
-	if url == "" {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("url"),
-			"Missing Url",
-			"The provider cannot create the MongoDB client as there is a missing or empty value for the url. "+
-				"Set the host value in the configuration or use the MONGODB_URL environment variable. "+
-				"If either is already set, ensure the value is not empty.",
-		)
+	if config.ReplicaSet != "" && !config.Direct {
+		arguments = addArgs(arguments, "replicaSet="+config.ReplicaSet)
 	}
 
-	if resp.Diagnostics.HasError() {
-		return
+	if config.Direct {
+		arguments = addArgs(arguments, "connect="+"direct")
 	}
+
+	var uri = "mongodb://" + config.Host + ":" + config.Port + arguments
 
 	// Create a new client using the configuration values
 	tflog.Info(ctx, "Creating MongoDB client")
 
+	dialer, dialerErr := proxyDialer(config.Proxy)
+
+	if dialerErr != nil {
+		resp.Diagnostics.AddError(
+			"Unable to create proxy dialer",
+			"An unexpected error occurred when creating the proxy dialer. "+
+				"If the error is not clear, please contact the provider developers.\n\n"+
+				"Error: "+dialerErr.Error(),
+		)
+		return
+	}
+
+	var opts *options.ClientOptions
+	var verify = false
 	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
-	opts := options.Client().ApplyURI(url).SetServerAPIOptions(serverAPI)
+
+	if config.InsecureSkipVerify {
+		verify = true
+	}
+
+	if config.Certificate != "" {
+		tlsConfig, err := getTLSConfigWithAllServerCertificates([]byte(config.Certificate), verify)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Unable to read certificate",
+				"An unexpected error occurred when reading the certificate. "+
+					"If the error is not clear, please contact the provider developers.\n\n"+
+					"Error: "+err.Error(),
+			)
+			return
+		}
+
+		opts = options.Client().ApplyURI(uri).SetServerAPIOptions(serverAPI).SetAuth(options.Credential{
+			AuthSource: config.AuthDatabase, Username: config.Username, Password: config.Password,
+		}).SetTLSConfig(tlsConfig).SetDialer(dialer)
+
+	} else {
+		opts = options.Client().ApplyURI(uri).SetServerAPIOptions(serverAPI).SetAuth(options.Credential{
+			AuthSource: config.AuthDatabase, Username: config.Username, Password: config.Password,
+		}).SetDialer(dialer)
+	}
+
 	client, err := mongo.Connect(context.TODO(), opts)
 	if err != nil {
 		resp.Diagnostics.AddError(
