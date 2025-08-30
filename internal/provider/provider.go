@@ -2,12 +2,14 @@ package provider
 
 import (
 	"context"
+	// "go/types"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
 	"strconv"
@@ -39,18 +41,18 @@ type mongodbProvider struct {
 }
 
 type mongodbProviderModel struct {
-	Host               string `tfsdk:"host"`
-	Port               string `tfsdk:"port"`
-	Certificate        string `tfsdk:"certificate"`
-	Username           string `tfsdk:"username"`
-	Password           string `tfsdk:"password"`
-	AuthDatabase       string `tfsdk:"auth_database"`
-	ReplicaSet         string `tfsdk:"replica_set"`
-	InsecureSkipVerify bool   `tfsdk:"insecure_skip_verify"`
-	SSL                bool   `tfsdk:"ssl"`
-	Direct             bool   `tfsdk:"direct"`
-	RetryWrites        bool   `tfsdk:"retrywrites"`
-	Proxy              string `tfsdk:"proxy"`
+	Host               types.String `tfsdk:"host"`
+	Port               types.String `tfsdk:"port"`
+	Certificate        types.String `tfsdk:"certificate"`
+	Username           types.String `tfsdk:"username"`
+	Password           types.String `tfsdk:"password"`
+	AuthDatabase       types.String `tfsdk:"auth_database"`
+	ReplicaSet         types.String `tfsdk:"replica_set"`
+	InsecureSkipVerify types.Bool   `tfsdk:"insecure_skip_verify"`
+	SSL                types.Bool   `tfsdk:"ssl"`
+	Direct             types.Bool   `tfsdk:"direct"`
+	RetryWrites        types.Bool   `tfsdk:"retrywrites"`
+	Proxy              types.String `tfsdk:"proxy"`
 }
 
 // Metadata returns the provider type name.
@@ -74,6 +76,7 @@ func (p *mongodbProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 			},
 			"certificate": schema.StringAttribute{
 				Optional:    true,
+				Required:    false,
 				Description: "PEM-encoded content of Mongodb host CA certificate",
 			},
 			"username": schema.StringAttribute{
@@ -86,30 +89,37 @@ func (p *mongodbProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 			},
 			"auth_database": schema.StringAttribute{
 				Optional:    true,
+				Required:    false,
 				Description: "The mongodb auth database",
 			},
 			"replica_set": schema.StringAttribute{
 				Optional:    true,
+				Required:    false,
 				Description: "The mongodb replica set",
 			},
 			"insecure_skip_verify": schema.BoolAttribute{
 				Optional:    true,
+				Required:    false,
 				Description: "ignore hostname verification",
 			},
 			"ssl": schema.BoolAttribute{
 				Optional:    true,
+				Required:    false,
 				Description: "ssl activation",
 			},
 			"direct": schema.BoolAttribute{
 				Optional:    true,
+				Required:    false,
 				Description: "enforces a direct connection instead of discovery",
 			},
 			"retrywrites": schema.BoolAttribute{
 				Optional:    true,
+				Required:    false,
 				Description: "Retryable Writes",
 			},
 			"proxy": schema.StringAttribute{
 				Optional:    true,
+				Required:    false,
 				Description: "Proxy through which to connect to MongoDB. Supported protocols are http, https, and socks5. ",
 			},
 		},
@@ -129,7 +139,7 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 
 	// If practitioner provided a configuration value for any of the
 	// attributes, it must be a known value.
-	if config.Host == "" {
+	if config.Host.ValueString() == "" {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("host"),
 			"Unknown MongoDB Host",
@@ -137,7 +147,7 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 		)
 	}
 
-	if config.Port == "" {
+	if config.Port.ValueString() == "" {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("port"),
 			"Unknown MongoDB Port",
@@ -145,7 +155,7 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 		)
 	}
 
-	if config.Username == "" {
+	if config.Username.ValueString() == "" {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("username"),
 			"Unknown MongoDB Username",
@@ -153,7 +163,7 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 		)
 	}
 
-	if config.Password == "" {
+	if config.Password.ValueString() == "" {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("password"),
 			"Unknown MongoDB Password",
@@ -167,26 +177,26 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 
 	var arguments = ""
 
-	arguments = addArgs(arguments, "retrywrites="+strconv.FormatBool(config.RetryWrites))
+	arguments = addArgs(arguments, "retrywrites="+strconv.FormatBool(config.RetryWrites.ValueBool()))
 
-	if config.SSL {
+	if config.SSL.ValueBool() {
 		arguments = addArgs(arguments, "ssl=true")
 	}
 
-	if config.ReplicaSet != "" && !config.Direct {
-		arguments = addArgs(arguments, "replicaSet="+config.ReplicaSet)
+	if config.ReplicaSet.ValueString() != "" && !config.Direct.ValueBool() {
+		arguments = addArgs(arguments, "replicaSet="+config.ReplicaSet.ValueString())
 	}
 
-	if config.Direct {
+	if config.Direct.ValueBool() {
 		arguments = addArgs(arguments, "connect="+"direct")
 	}
 
-	var uri = "mongodb://" + config.Host + ":" + config.Port + arguments
+	var uri = "mongodb://" + config.Host.ValueString() + ":" + config.Port.ValueString() + arguments
 
 	// Create a new client using the configuration values
 	tflog.Info(ctx, "Creating MongoDB client")
 
-	dialer, dialerErr := proxyDialer(config.Proxy)
+	dialer, dialerErr := proxyDialer(config.Proxy.ValueString())
 
 	if dialerErr != nil {
 		resp.Diagnostics.AddError(
@@ -202,12 +212,12 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 	var verify = false
 	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
 
-	if config.InsecureSkipVerify {
+	if config.InsecureSkipVerify.ValueBool() {
 		verify = true
 	}
 
-	if config.Certificate != "" {
-		tlsConfig, err := getTLSConfigWithAllServerCertificates([]byte(config.Certificate), verify)
+	if config.Certificate.ValueString() != "" {
+		tlsConfig, err := getTLSConfigWithAllServerCertificates([]byte(config.Certificate.ValueString()), verify)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Unable to read certificate",
@@ -219,12 +229,12 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 		}
 
 		opts = options.Client().ApplyURI(uri).SetServerAPIOptions(serverAPI).SetAuth(options.Credential{
-			AuthSource: config.AuthDatabase, Username: config.Username, Password: config.Password,
+			AuthSource: config.AuthDatabase.ValueString(), Username: config.Username.ValueString(), Password: config.Password.ValueString(),
 		}).SetTLSConfig(tlsConfig).SetDialer(dialer)
 
 	} else {
 		opts = options.Client().ApplyURI(uri).SetServerAPIOptions(serverAPI).SetAuth(options.Credential{
-			AuthSource: config.AuthDatabase, Username: config.Username, Password: config.Password,
+			AuthSource: config.AuthDatabase.ValueString(), Username: config.Username.ValueString(), Password: config.Password.ValueString(),
 		}).SetDialer(dialer)
 	}
 

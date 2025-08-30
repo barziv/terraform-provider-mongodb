@@ -123,14 +123,18 @@ func getTLSConfigWithAllServerCertificates(ca []byte, verify bool) (*tls.Config,
 }
 
 func proxyDialer(proxyUrlFromProvider string) (options.ContextDialer, error) {
-	proxyURL, err := url.Parse(proxyUrlFromProvider)
-	if err != nil {
-		return nil, err
-	}
-	proxyDialer, err := proxy.FromURL(proxyURL, proxy.Direct)
-	if err != nil {
-		return nil, err
+	if proxyUrlFromProvider != "" {
+		proxyURL, err := url.Parse(proxyUrlFromProvider)
+		if err != nil {
+			return nil, err
+		}
+		proxyDialer, err := proxy.FromURL(proxyURL, proxy.Direct)
+		if err != nil {
+			return nil, err
+		}
+
+		return proxyDialer.(options.ContextDialer), nil
 	}
 
-	return proxyDialer.(options.ContextDialer), nil
+	return nil, nil
 }
