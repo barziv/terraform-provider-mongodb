@@ -53,6 +53,7 @@ type mongodbProviderModel struct {
 	Direct             types.Bool   `tfsdk:"direct"`
 	RetryWrites        types.Bool   `tfsdk:"retrywrites"`
 	Proxy              types.String `tfsdk:"proxy"`
+	Url                types.String `tfsdk:"url"`
 }
 
 // Metadata returns the provider type name.
@@ -67,60 +68,56 @@ func (p *mongodbProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 		Description: "Create resources in MongoDB.",
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{
-				Required:    true,
+				Optional:    true,
 				Description: "The mongodb server address.",
 			},
 			"port": schema.StringAttribute{
-				Required:    true,
+				Optional:    true,
 				Description: "The mongodb server port",
 			},
 			"certificate": schema.StringAttribute{
 				Optional:    true,
-				Required:    false,
 				Description: "PEM-encoded content of Mongodb host CA certificate",
 			},
 			"username": schema.StringAttribute{
-				Required:    true,
+				Optional:    true,
 				Description: "The mongodb user",
 			},
 			"password": schema.StringAttribute{
-				Required:    true,
+				Optional:    true,
 				Description: "The mongodb password",
 			},
 			"auth_database": schema.StringAttribute{
 				Optional:    true,
-				Required:    false,
 				Description: "The mongodb auth database",
 			},
 			"replica_set": schema.StringAttribute{
 				Optional:    true,
-				Required:    false,
 				Description: "The mongodb replica set",
 			},
 			"insecure_skip_verify": schema.BoolAttribute{
 				Optional:    true,
-				Required:    false,
 				Description: "ignore hostname verification",
 			},
 			"ssl": schema.BoolAttribute{
 				Optional:    true,
-				Required:    false,
 				Description: "ssl activation",
 			},
 			"direct": schema.BoolAttribute{
 				Optional:    true,
-				Required:    false,
 				Description: "enforces a direct connection instead of discovery",
 			},
 			"retrywrites": schema.BoolAttribute{
 				Optional:    true,
-				Required:    false,
 				Description: "Retryable Writes",
 			},
 			"proxy": schema.StringAttribute{
 				Optional:    true,
-				Required:    false,
 				Description: "Proxy through which to connect to MongoDB. Supported protocols are http, https, and socks5. ",
+			},
+			"url": schema.StringAttribute{
+				Optional:    true,
+				Description: "The url of the mongodb server.",
 			},
 		},
 	}
@@ -139,35 +136,19 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 
 	// If practitioner provided a configuration value for any of the
 	// attributes, it must be a known value.
-	if config.Host.ValueString() == "" {
+	if config.Url.ValueString() == "" && config.Host.ValueString() == "" {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("host"),
-			"Unknown MongoDB Host",
-			"The provider cannot create the MongoDB client as there is an unknown configuration value for the host. ",
+			"Missing host or url",
+			"The provider cannot create the MongoDB client as there is an unknown configuration value for the host. Please specify either host or url.",
 		)
 	}
 
-	if config.Port.ValueString() == "" {
+	if config.Url.ValueString() != "" && config.Host.ValueString() != "" {
 		resp.Diagnostics.AddAttributeError(
-			path.Root("port"),
-			"Unknown MongoDB Port",
-			"The provider cannot create the MongoDB client as there is an unknown configuration value for the port. ",
-		)
-	}
-
-	if config.Username.ValueString() == "" {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("username"),
-			"Unknown MongoDB Username",
-			"The provider cannot create the MongoDB client as there is an unknown configuration value for the Username. ",
-		)
-	}
-
-	if config.Password.ValueString() == "" {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("password"),
-			"Unknown MongoDB Password",
-			"The provider cannot create the MongoDB client as there is an unknown configuration value for the password. ",
+			path.Root("host"),
+			"Conflicting host and url",
+			"The provider cannot create the MongoDB client as there are conflicting configuration values for host and url. Please specify either host or url, but not both.",
 		)
 	}
 
@@ -175,23 +156,28 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 		return
 	}
 
-	var arguments = ""
+	var uri string
+	if config.Url.ValueString() != "" {
+		uri = config.Url.ValueString()
+	} else {
+		var arguments = ""
 
-	arguments = addArgs(arguments, "retrywrites="+strconv.FormatBool(config.RetryWrites.ValueBool()))
+		arguments = addArgs(arguments, "retrywrites="+strconv.FormatBool(config.RetryWrites.ValueBool()))
 
-	if config.SSL.ValueBool() {
-		arguments = addArgs(arguments, "ssl=true")
+		if config.SSL.ValueBool() {
+			arguments = addArgs(arguments, "ssl=true")
+		}
+
+		if config.ReplicaSet.ValueString() != "" && !config.Direct.ValueBool() {
+			arguments = addArgs(arguments, "replicaSet="+config.ReplicaSet.ValueString())
+		}
+
+		if config.Direct.ValueBool() {
+			arguments = addArgs(arguments, "connect="+"direct")
+		}
+
+		uri = "mongodb://" + config.Host.ValueString() + ":" + config.Port.ValueString() + arguments
 	}
-
-	if config.ReplicaSet.ValueString() != "" && !config.Direct.ValueBool() {
-		arguments = addArgs(arguments, "replicaSet="+config.ReplicaSet.ValueString())
-	}
-
-	if config.Direct.ValueBool() {
-		arguments = addArgs(arguments, "connect="+"direct")
-	}
-
-	var uri = "mongodb://" + config.Host.ValueString() + ":" + config.Port.ValueString() + arguments
 
 	// Create a new client using the configuration values
 	tflog.Info(ctx, "Creating MongoDB client")
