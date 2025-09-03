@@ -8,7 +8,10 @@ import (
 const (
 	providerConfig = `
 provider "mongodb" {
-  url = "mongodb://localhost"
+  host = "localhost"
+  port = "27017"
+  username = "test"
+  password = "test"
 }
 `
 )
