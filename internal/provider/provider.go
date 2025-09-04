@@ -142,6 +142,7 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 			"Missing host or url",
 			"The provider cannot create the MongoDB client as there is an unknown configuration value for the host. Please specify either host or url.",
 		)
+		return
 	}
 
 	if config.Url.ValueString() != "" && config.Host.ValueString() != "" {
@@ -150,6 +151,7 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 			"Conflicting host and url",
 			"The provider cannot create the MongoDB client as there are conflicting configuration values for host and url. Please specify either host or url, but not both.",
 		)
+		return
 	}
 
 	if resp.Diagnostics.HasError() {
