@@ -1,8 +1,8 @@
 package provider
 
 import (
-	"testing"
 	"regexp"
+	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
@@ -64,14 +64,14 @@ func TestMongodbProvider_Configure_WithURL(t *testing.T) {
 func TestMongodbProvider_Configure_Error(t *testing.T) {
 	t.Parallel()
 
-	resource.UnitTest(t, resource.TestCase{
+	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config: `
 provider "mongodb" {}
 `,
-				ExpectError: regexp.MustCompile(`(Missing host or url)`),
+				ExpectError: regexp.MustCompile(`Missing host or url`),
 			},
 			{
 				Config: `
@@ -80,7 +80,7 @@ provider "mongodb" {
   url = "mongodb://localhost:27017"
 }
 `,
-				ExpectError: regexp.MustCompile(`(Conflicting host and url)`),
+				ExpectError: regexp.MustCompile(`Conflicting host and url`),
 			},
 		},
 	})
