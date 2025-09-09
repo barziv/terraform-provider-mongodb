@@ -69,17 +69,23 @@ func TestMongodbProvider_Configure_Error(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: `
-provider "mongodb" {}
-`,
+	
+	provider "mongodb" {}
+	`,
+
+				Check:       resource.ComposeTestCheckFunc(),
 				ExpectError: regexp.MustCompile(`Missing host or url`),
 			},
 			{
 				Config: `
-provider "mongodb" {
-  host = "localhost"
-  url = "mongodb://localhost:27017"
-}
-`,
+	
+		provider "mongodb" {
+		  host = "localhost"
+		  url = "mongodb://localhost:27017"
+		}
+	
+	`,
+				Check:       resource.ComposeTestCheckFunc(),
 				ExpectError: regexp.MustCompile(`Conflicting host and url`),
 			},
 		},

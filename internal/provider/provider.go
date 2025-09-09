@@ -4,11 +4,13 @@ import (
 	"context"
 	// "go/types"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 
@@ -70,6 +72,12 @@ func (p *mongodbProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 			"host": schema.StringAttribute{
 				Optional:    true,
 				Description: "The mongodb server address.",
+				Validators: []validator.String{
+					stringvalidator.ExactlyOneOf(
+						path.MatchRoot("host"),
+						path.MatchRoot("url"),
+					),
+				},
 			},
 			"port": schema.StringAttribute{
 				Optional:    true,
@@ -118,6 +126,12 @@ func (p *mongodbProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 			"url": schema.StringAttribute{
 				Optional:    true,
 				Description: "The url of the mongodb server.",
+				Validators: []validator.String{
+					stringvalidator.ExactlyOneOf(
+						path.MatchRoot("host"),
+						path.MatchRoot("url"),
+					),
+				},
 			},
 		},
 	}
@@ -142,6 +156,7 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 			"Missing host or url",
 			"The provider cannot create the MongoDB client as there is an unknown configuration value for the host. Please specify either host or url.",
 		)
+		resp.Diagnostics.AddError("fatal", "Missing host or url")
 		return
 	}
 
