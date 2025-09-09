@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	// "go/types"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
