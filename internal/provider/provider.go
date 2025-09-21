@@ -44,9 +44,11 @@ type mongodbProvider struct {
 type mongodbProviderModel struct {
 	Host               types.String `tfsdk:"host"`
 	Port               types.String `tfsdk:"port"`
+	CaCertificate      types.String `tfsdk:"ca_certificate"`
 	Certificate        types.String `tfsdk:"certificate"`
 	Username           types.String `tfsdk:"username"`
 	Password           types.String `tfsdk:"password"`
+	AuthMechanism      types.String `tfsdk:"auth_mechanism"`
 	AuthDatabase       types.String `tfsdk:"auth_database"`
 	ReplicaSet         types.String `tfsdk:"replica_set"`
 	InsecureSkipVerify types.Bool   `tfsdk:"insecure_skip_verify"`
@@ -84,6 +86,10 @@ func (p *mongodbProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 			},
 			"certificate": schema.StringAttribute{
 				Optional:    true,
+				Description: "PEM-encoded content of Mongodb host certificate",
+			},
+			"ca_certificate": schema.StringAttribute{
+				Optional:    true,
 				Description: "PEM-encoded content of Mongodb host CA certificate",
 			},
 			"username": schema.StringAttribute{
@@ -93,6 +99,10 @@ func (p *mongodbProvider) Schema(_ context.Context, _ provider.SchemaRequest, re
 			"password": schema.StringAttribute{
 				Optional:    true,
 				Description: "The mongodb password",
+			},
+			"auth_mechanism": schema.StringAttribute{
+				Optional:    true,
+				Description: "The mongodb auth mechanism",
 			},
 			"auth_database": schema.StringAttribute{
 				Optional:    true,
@@ -172,9 +182,12 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 		return
 	}
 
-	var uri string
+	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
+	var opts *options.ClientOptions
 	if config.Url.ValueString() != "" {
-		uri = config.Url.ValueString()
+		uri := config.Url.ValueString()
+		opts = options.Client().ApplyURI(uri).SetServerAPIOptions(serverAPI)
+
 	} else {
 		var arguments = ""
 
@@ -192,53 +205,50 @@ func (p *mongodbProvider) Configure(ctx context.Context, req provider.ConfigureR
 			arguments = addArgs(arguments, "connect="+"direct")
 		}
 
-		uri = "mongodb://" + config.Host.ValueString() + ":" + config.Port.ValueString() + arguments
-	}
+		uri := "mongodb://" + config.Host.ValueString() + ":" + config.Port.ValueString() + arguments
 
-	// Create a new client using the configuration values
-	tflog.Info(ctx, "Creating MongoDB client")
+		dialer, dialerErr := proxyDialer(config.Proxy.ValueString())
 
-	dialer, dialerErr := proxyDialer(config.Proxy.ValueString())
-
-	if dialerErr != nil {
-		resp.Diagnostics.AddError(
-			"Unable to create proxy dialer",
-			"An unexpected error occurred when creating the proxy dialer. "+
-				"If the error is not clear, please contact the provider developers.\n\n"+
-				"Error: "+dialerErr.Error(),
-		)
-		return
-	}
-
-	var opts *options.ClientOptions
-	var verify = false
-	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
-
-	if config.InsecureSkipVerify.ValueBool() {
-		verify = true
-	}
-
-	if config.Certificate.ValueString() != "" {
-		tlsConfig, err := getTLSConfigWithAllServerCertificates([]byte(config.Certificate.ValueString()), verify)
-		if err != nil {
+		if dialerErr != nil {
 			resp.Diagnostics.AddError(
-				"Unable to read certificate",
-				"An unexpected error occurred when reading the certificate. "+
+				"Unable to create proxy dialer",
+				"An unexpected error occurred when creating the proxy dialer. "+
 					"If the error is not clear, please contact the provider developers.\n\n"+
-					"Error: "+err.Error(),
+					"Error: "+dialerErr.Error(),
 			)
 			return
 		}
 
-		opts = options.Client().ApplyURI(uri).SetServerAPIOptions(serverAPI).SetAuth(options.Credential{
-			AuthSource: config.AuthDatabase.ValueString(), Username: config.Username.ValueString(), Password: config.Password.ValueString(),
-		}).SetTLSConfig(tlsConfig).SetDialer(dialer)
+		var verify = false
 
-	} else {
-		opts = options.Client().ApplyURI(uri).SetServerAPIOptions(serverAPI).SetAuth(options.Credential{
-			AuthSource: config.AuthDatabase.ValueString(), Username: config.Username.ValueString(), Password: config.Password.ValueString(),
-		}).SetDialer(dialer)
+		if config.InsecureSkipVerify.ValueBool() {
+			verify = true
+		}
+
+		if config.Certificate.ValueString() != "" {
+			tlsConfig, err := getTLSConfigWithAllServerCertificates([]byte(config.CaCertificate.ValueString()), []byte(config.Certificate.ValueString()), []byte(config.Certificate.ValueString()), verify)
+			if err != nil {
+				resp.Diagnostics.AddError(
+					"Unable to read certificate",
+					"An unexpected error occurred when reading the certificate. "+
+						"If the error is not clear, please contact the provider developers.\n\n"+
+						"Error: "+err.Error(),
+				)
+				return
+			}
+
+			opts = options.Client().ApplyURI(uri).SetServerAPIOptions(serverAPI).SetAuth(options.Credential{
+				AuthSource: config.AuthDatabase.ValueString(), Username: config.Username.ValueString(), Password: config.Password.ValueString(), AuthMechanism: config.AuthMechanism.ValueString(),
+			}).SetTLSConfig(tlsConfig).SetDialer(dialer)
+
+		} else {
+			opts = options.Client().ApplyURI(uri).SetServerAPIOptions(serverAPI).SetAuth(options.Credential{
+				AuthSource: config.AuthDatabase.ValueString(), Username: config.Username.ValueString(), Password: config.Password.ValueString(), AuthMechanism: config.AuthMechanism.ValueString(),
+			}).SetDialer(dialer)
+		}
 	}
+	// Create a new client using the configuration values
+	tflog.Info(ctx, "Creating MongoDB client")
 
 	client, err := mongo.Connect(context.TODO(), opts)
 	if err != nil {
