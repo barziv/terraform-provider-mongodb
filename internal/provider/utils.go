@@ -104,19 +104,35 @@ func addArgs(arguments string, newArg string) string {
 
 }
 
-func getTLSConfigWithAllServerCertificates(ca []byte, verify bool) (*tls.Config, error) {
-	/* As of version 1.2.1, the MongoDB Go Driver will only use the first CA server certificate found in sslcertificateauthorityfile.
-	   The code below addresses this limitation by manually appending all server certificates found in sslcertificateauthorityfile
-	   to a custom TLS configuration used during client creation. */
+// caPEM   – optional CA certificate(s) in PEM format
+// certPEM – optional client certificate in PEM format
+// keyPEM  – optional client private key in PEM format
+// insecureSkipVerify – true disables server name verification
+func getTLSConfigWithAllServerCertificates(
+	caPEM, certPEM, keyPEM []byte,
+	insecureSkipVerify bool,
+) (*tls.Config, error) {
 
-	tlsConfig := new(tls.Config)
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: insecureSkipVerify,
+	}
 
-	tlsConfig.InsecureSkipVerify = verify
-	tlsConfig.RootCAs = x509.NewCertPool()
-	ok := tlsConfig.RootCAs.AppendCertsFromPEM(ca)
+	// --- Handle CA certificates (optional) ---
+	if len(caPEM) > 0 {
+		rootCAs := x509.NewCertPool()
+		if ok := rootCAs.AppendCertsFromPEM(caPEM); !ok {
+			return nil, errors.New("failed parsing CA PEM file")
+		}
+		tlsConfig.RootCAs = rootCAs
+	}
 
-	if !ok {
-		return tlsConfig, errors.New("Failed parsing pem file")
+	// --- Handle client certificate (optional) ---
+	if len(certPEM) > 0 && len(keyPEM) > 0 {
+		cert, err := tls.X509KeyPair(certPEM, keyPEM)
+		if err != nil {
+			return nil, err
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
 	}
 
 	return tlsConfig, nil
